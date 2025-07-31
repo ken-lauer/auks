@@ -64,10 +64,11 @@ jobs:
             jq '.[] | select(.name == "${{ steps.version.outputs.version }}") | [.assets[].name | select(test(".*\\.rpm$"))] | length' | \
             .github/scripts/generate_release.sh)
           else
-            RELEASE="$(git describe --abbrev=4 --match='v*' --long HEAD)"
+            RELEASE="1"
           fi
           # Shortcut to overriding the versioning mechanism
-          echo "$RELEASE" >> .tarball-version
+          TAG=$(git describe --abbrev=4 --match='v*' --long HEAD)
+          echo "$TAG-$RELEASE" >> .tarball-version
 
       - name: Build RPM in Rocky Linux container
         run: |
