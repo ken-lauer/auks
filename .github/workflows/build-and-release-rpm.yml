@@ -1,0 +1,149 @@
+name: Release RPM
+
+on:
+  push:
+    branches: ["*"]
+    tags: ["*"]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        type: string
+        description: Tag to release (e.g. 0.20)
+        required: true
+
+jobs:
+  build-rocky-rpms:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            rpm_arch: x86_64
+          - arch: arm64
+            platform: linux/arm64
+            rpm_arch: aarch64
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: "${{ github.event.inputs.release-tag || github.ref }}"
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.release-tag }}"
+          elif [[ "${{ github.ref }}" =~ ^refs/tags/ ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="dev$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Set up QEMU for cross-platform builds
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate release number
+        id: release
+        run: |
+          if [[ "${{ github.ref }}" =~ ^refs/tags/ ]] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE=$(curl -fSsL https://api.github.com/repos/${{ github.repository }}/releases | \
+            jq '.[] | select(.name == "${{ steps.version.outputs.version }}") | [.assets[].name | select(test(".*\\.rpm$"))] | length' | \
+            .github/scripts/generate_release.sh)
+          else
+            RELEASE="$(git describe --abbrev=4 --match='v*' --long HEAD)"
+          fi
+          # Shortcut to overriding the versioning mechanism
+          echo "$RELEASE" >> .tarball-version
+
+      - name: Build RPM in Rocky Linux container
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.platform }} \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            rockylinux:9.3 \
+            bash -c "
+              set -ex
+              
+              # Install Prerequisites
+              dnf install -y --allowerasing rpm-build rpmdevtools git curl tar systemd autoconf automake libtool libtirpc krb5-devel krb5-workstation make gcc pam-devel
+              dnf install --enablerepo crb -y --allowerasing libtirpc-devel
+              dnf install -y epel-release
+              dnf install -y slurm-devel
+             
+              git config --global --add safe.directory /workspace
+
+              autoreconf -fvi
+              ./configure
+              make rpm
+
+              mkdir -p /workspace/RPMS/${{ matrix.arch }}
+              cp *.rpm /workspace/RPMS/${{ matrix.arch }}/
+            "
+
+      - name: List built packages
+        run: |
+          echo "Built packages for ${{ matrix.arch }}:"
+          ls -la RPMS/${{ matrix.arch }}/
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: auks-${{ matrix.arch }}
+          path: RPMS/${{ matrix.arch }}/*.rpm
+
+  release:
+    name: Create Release
+    needs: build-rocky-rpms
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.release-tag }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release/
+          cp -f artifacts/auks-amd64/*.rpm release/
+          cp -f artifacts/auks-arm64/*.rpm release/
+
+          # Create checksums
+          cd release/
+          sha256sum *.rpm > checksums.txt
+
+      - name: Release RPM
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "${{ steps.version.outputs.version }}"
+          files: |
+            release/*.rpm
+            release/checksums.txt
