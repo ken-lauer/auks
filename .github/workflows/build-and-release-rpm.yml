@@ -17,14 +17,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [amd64, arm64]
         include:
           - arch: amd64
             platform: linux/amd64
             rpm_arch: x86_64
+            slurm_packages: slurm-devel slurm
+            slurm_variant: standard
           - arch: arm64
             platform: linux/arm64
             rpm_arch: aarch64
+            slurm_packages: slurm-devel slurm
+            slurm_variant: standard
+          - arch: amd64
+            platform: linux/amd64
+            rpm_arch: x86_64
+            slurm_packages: slurm-devel-ohpc slurm-ohpc
+            slurm_variant: ohpc
+          - arch: arm64
+            platform: linux/arm64
+            rpm_arch: aarch64
+            slurm_packages: slurm-devel-ohpc slurm-ohpc
+            slurm_variant: ohpc
 
     permissions:
       contents: write
@@ -79,12 +92,23 @@ jobs:
             rockylinux:9.3 \
             bash -c "
               set -ex
-              
-              # Install Prerequisites
+
+              if [[ "${{ matrix.slurm_variant }}" == "ohpc" ]]; then
+                cp -f auks.spec.ohpc.in auks.spec.in
+              fi
+
+              # OpenHPC repo (always install, needed for ohpc variant)
+              dnf install -y http://repos.openhpc.community/OpenHPC/3/EL_9/${{ matrix.rpm_arch }}/ohpc-release-3-1.el9.${{ matrix.rpm_arch }}.rpm
+              dnf -y install dnf-plugins-core
+              dnf config-manager --set-enabled crb
+
+              # Install base prerequisites
               dnf install -y --allowerasing rpm-build rpmdevtools git curl tar systemd autoconf automake libtool libtirpc krb5-devel krb5-workstation make gcc pam-devel
-              dnf install --enablerepo crb -y --allowerasing libtirpc-devel
+              dnf install -y --allowerasing libtirpc-devel
               dnf install -y epel-release
-              dnf install -y slurm-devel
+              
+              # Install variant-specific Slurm packages
+              dnf install -y --allowerasing ${{ matrix.slurm_packages }}
              
               git config --global --add safe.directory /workspace
 
@@ -92,20 +116,21 @@ jobs:
               ./configure
               make rpm
 
-              mkdir -p /workspace/RPMS/${{ matrix.arch }}
-              cp *.rpm /workspace/RPMS/${{ matrix.arch }}/
+              # Create variant-specific directory
+              mkdir -p /workspace/RPMS/${{ matrix.arch }}-${{ matrix.slurm_variant }}
+              cp *.rpm /workspace/RPMS/${{ matrix.arch }}-${{ matrix.slurm_variant }}/
             "
 
       - name: List built packages
         run: |
-          echo "Built packages for ${{ matrix.arch }}:"
-          ls -la RPMS/${{ matrix.arch }}/
+          echo "Built packages for ${{ matrix.arch }}-${{ matrix.slurm_variant }}:"
+          ls -la RPMS/${{ matrix.arch }}-${{ matrix.slurm_variant }}/
 
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: auks-${{ matrix.arch }}
-          path: RPMS/${{ matrix.arch }}/*.rpm
+          name: auks-${{ matrix.arch }}-${{ matrix.slurm_variant }}
+          path: RPMS/${{ matrix.arch }}-${{ matrix.slurm_variant }}/*.rpm
 
   release:
     name: Create Release
@@ -134,8 +159,12 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release/
-          cp -f artifacts/auks-amd64/*.rpm release/
-          cp -f artifacts/auks-arm64/*.rpm release/
+
+          # Copy all variants and architectures
+          cp -f artifacts/auks-amd64-standard/*.rpm release/
+          cp -f artifacts/auks-arm64-standard/*.rpm release/
+          cp -f artifacts/auks-amd64-ohpc/*.rpm release/
+          cp -f artifacts/auks-arm64-ohpc/*.rpm release/
 
           # Create checksums
           cd release/

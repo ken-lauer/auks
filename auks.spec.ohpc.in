@@ -70,14 +70,15 @@ Development package for AUKS.  This package includes the header files
 for the AUKS API.
 
 %if %{with slurm}
-%package slurm
-Summary: Slurm plugins for Auks
+%package slurm-ohpc
+Summary: Slurm plugins for Auks (OpenHPC)
 Group: System Environment/Base
-Requires: (slurm >= 22.05.3 or slurm-ohpc >= 22.05.3)
+Requires: slurm-ohpc >= 22.05.3
 Requires: auks >= %{version}
-BuildRequires: (slurm-devel >= 22.05.3 or slurm-devel-ohpc >= 22.05.3)
-%description slurm
-Plugins that provides Kerberos Credential Support to Slurm
+BuildRequires: slurm-devel-ohpc >= 22.05.3
+Conflicts: auks-slurm-ohpc
+%description slurm-ohpc
+Plugins that provides Kerberos Credential Support to OpenHPC Slurm
 %endif
 
 %if %{with pam}
@@ -163,7 +164,7 @@ install -D -m644 src/plugins/slurm/slurm-spank-auks.conf ${RPM_BUILD_ROOT}/etc/s
 %{_libdir}/libauksapi.so
 
 %if %{with slurm}
-%files slurm
+%files slurm-ohpc
 %defattr(-,root,root,-)
 /etc/slurm/plugstack.conf.d/auks.conf.example
 %{_libdir}/slurm/auks.so
