@@ -71,13 +71,26 @@ for the AUKS API.
 
 %if %{with slurm}
 %package slurm
-Summary: Slurm plugins for Auks
+Summary: Slurm plugins for Auks (standard)
 Group: System Environment/Base
-Requires: (slurm >= 22.05.3 or slurm-ohpc >= 22.05.3)
+Requires: slurm >= 22.05.3
 Requires: auks >= %{version}
-BuildRequires: (slurm-devel >= 22.05.3 or slurm-devel-ohpc >= 22.05.3)
+BuildRequires: slurm-devel >= 22.05.3
+Conflicts: auks-slurm-ohpc
 %description slurm
-Plugins that provides Kerberos Credential Support to Slurm
+Plugins that provides Kerberos Credential Support to standard Slurm
+%endif
+
+%if %{with slurm_ohpc}
+%package slurm-ohpc
+Summary: Slurm plugins for Auks (OpenHPC)
+Group: System Environment/Base
+Requires: slurm-ohpc >= 22.05.3
+Requires: auks >= %{version}
+BuildRequires: slurm-devel-ohpc >= 22.05.3
+Conflicts: auks-slurm
+%description slurm-ohpc
+Plugins that provides Kerberos Credential Support to OpenHPC Slurm
 %endif
 
 %if %{with pam}
